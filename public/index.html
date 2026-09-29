@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#181a19">
+  <title>LOWTALK — 声だけで、ふらっと。</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" type="module"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="ホーム"><span class="brand-silence" aria-hidden="true">...</span> <span id="store-brand">LOWTALK</span></a>
+      <span class="prototype-label">A VOICE-ONLY PLACE TO DROP IN, TALK, OR JUST LISTEN.</span>
+    </header>
+
+    <main id="app-main">
+      <section class="intro" aria-labelledby="headline">
+        <h1 id="headline">声だけで、<br><em>ふらっと。</em></h1>
+        <p class="lead">音声だけの、小さな相席。<br>好きなテーブルで、ゆるやかに会いましょう。</p>
+        <section id="chat-panel" class="chat-panel" aria-label="店内チャット" hidden>
+          <form id="chat-form" class="chat-form">
+            <input id="chat-input" maxlength="240" autocomplete="off" placeholder="ひとこと書く" aria-label="チャットメッセージ">
+            <button class="chat-send" type="submit">送る</button>
+          </form>
+          <ol id="chat-list" class="chat-list" aria-live="polite"></ol>
+        </section>
+      </section>
+
+      <section class="room-card" aria-labelledby="room-title">
+        <div class="room-topline">
+          <div><p class="section-label">TALK ROOM</p><h2 id="room-title">LOWTALK</h2><p id="store-message" class="store-message" hidden></p></div>
+          <div class="seat-count"><strong id="seat-count">—</strong><span id="seat-capacity">/ 定員24名</span></div>
+        </div>
+        <div class="table-visual">
+          <img id="table-image" src="/images/tables/window-side.webp" alt="雨の夜景が見える窓ぎわのテーブル">
+        </div>
+
+        <div class="table-picker" aria-label="テーブルを選ぶ">
+          <button class="table-choice is-selected" type="button" data-table="1"><span class="table-name">窓ぎわ</span><span class="table-occupancy">— / 6</span></button>
+          <button class="table-choice" type="button" data-table="2"><span class="table-name">ランプ下</span><span class="table-occupancy">— / 6</span></button>
+          <button class="table-choice" type="button" data-table="3"><span class="table-name">奥の席</span><span class="table-occupancy">— / 6</span></button>
+          <button class="table-choice" type="button" data-table="4"><span class="table-name">カウンター</span><span class="table-occupancy">— / 6</span></button>
+        </div>
+
+        <div id="lobby" class="lobby">
+          <div id="entry-gate" class="entry-gate" hidden>
+            <p>この店には合言葉があります。</p>
+            <form id="entry-form" class="join-row">
+              <input id="entry-passcode" type="password" maxlength="64" autocomplete="current-password" placeholder="合言葉">
+              <button class="button button-primary" type="submit">扉を開ける</button>
+            </form>
+            <p id="entry-message" class="message" role="status"></p>
+          </div>
+          <div id="join-fields">
+            <label for="display-name">お名前</label>
+            <div class="join-row">
+              <input id="display-name" name="name" maxlength="24" autocomplete="nickname" placeholder="呼ばれたい名前を入力" aria-describedby="name-hint">
+              <button id="join-button" class="button button-primary" type="button">席につく <span aria-hidden="true">↗</span></button>
+            </div>
+            <p id="name-hint" class="hint">マイクの使用許可を求めます。許可しなくても聞くだけで参加できます。</p>
+          </div>
+          <div id="closed-notice" class="closed-notice" hidden><strong id="closed-title">ただいま閉店しています。</strong><strong id="closed-next"></strong></div>
+        </div>
+
+        <div id="in-room" class="in-room" hidden>
+          <div class="room-status"><span class="status-icon">●</span><span id="status-text">接続中…</span></div>
+          <ul id="participant-list" class="participant-list" aria-label="参加者"></ul>
+          <div class="controls">
+            <button id="mic-button" class="button button-secondary" type="button" aria-pressed="false">マイクをオフ</button>
+            <button id="leave-button" class="button button-outline" type="button">席を離れる</button>
+          </div>
+        </div>
+        <p id="message" class="message" role="status" aria-live="polite"></p>
+      </section>
+
+    </main>
+    <footer><span>LOWTALK <span id="app-version"></span> © 2026, yoshihiko.com</span><button id="admin-open" class="footer-link" type="button">管理</button></footer>
+  </div>
+
+  <dialog id="admin-dialog" class="admin-dialog">
+    <button id="admin-close" class="dialog-close" type="button" aria-label="閉じる">×</button>
+    <section id="admin-login-view">
+      <h2>管理者ログイン</h2>
+      <form id="admin-login-form" class="admin-form">
+        <label for="admin-password">管理者パスワード</label>
+        <input id="admin-password" type="password" autocomplete="current-password" required>
+        <button class="button button-primary" type="submit">ログイン</button>
+      </form>
+    </section>
+    <section id="admin-password-view" hidden>
+      <h2>新しいパスワードを設定</h2>
+      <form id="admin-password-form" class="admin-form">
+        <label for="admin-new-password">新しいパスワード <small>10文字以上</small></label>
+        <input id="admin-new-password" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+        <label for="admin-new-password-confirm">新しいパスワードをもう一度</label>
+        <input id="admin-new-password-confirm" type="password" minlength="10" maxlength="128" autocomplete="new-password" required>
+        <button class="button button-primary" type="submit">パスワードを変更</button>
+        <button id="admin-password-back" class="button button-outline" type="button">管理画面へ戻る</button>
+      </form>
+    </section>
+    <section id="admin-panel" hidden>
+      <div class="admin-heading"><div><p class="section-label">STORE SETTINGS</p><h2>店の管理</h2></div><div class="admin-actions"><button id="admin-change-open" class="footer-link" type="button">パスワード変更</button><button id="admin-logout" class="footer-link" type="button">ログアウト</button></div></div>
+      <div class="admin-status">
+        <p class="section-label">NOW</p>
+        <p id="admin-status-text" class="admin-status-text"></p>
+        <div class="admin-status-actions">
+          <button id="admin-open-now" class="button button-primary" type="button">今すぐ開ける</button>
+          <button id="admin-close-now" class="button button-outline" type="button">今すぐ閉める</button>
+          <button id="admin-skip-next" class="button button-outline" type="button">次回の営業を休む</button>
+          <button id="admin-follow-schedule" class="button button-outline" type="button">営業時間どおりに戻す</button>
+        </div>
+      </div>
+      <form id="admin-config-form" class="admin-form">
+        <label for="admin-store-name">お店の名前</label><input id="admin-store-name" maxlength="40" required>
+        <label for="admin-store-message">お店からのメッセージ <small>店名の下に表示・300文字まで・空欄なら非表示</small></label><textarea id="admin-store-message" rows="3" maxlength="300"></textarea>
+        <fieldset class="admin-tables">
+          <legend>使うテーブル <small>1つ以上</small></legend>
+          <div id="admin-tables-rows" class="admin-tables-rows"></div>
+        </fieldset>
+        <fieldset class="admin-hours">
+          <legend>営業時間 <small>終了が開始より前なら翌日まで（例 21:00〜02:00）</small></legend>
+          <div id="admin-hours-rows"></div>
+          <p id="admin-hours-note" class="hint"></p>
+        </fieldset>
+        <label class="switch-row"><span>入り口に合言葉をつける</span><input id="admin-passcode-enabled" type="checkbox"></label>
+        <label for="admin-passcode">新しい合言葉 <small>変更しない場合は空欄</small></label><input id="admin-passcode" type="password" minlength="4" maxlength="64" autocomplete="new-password">
+        <button class="button button-primary" type="submit">設定を保存</button>
+      </form>
+      <div class="admin-chat">
+        <div class="admin-chat-head"><div><p class="section-label">CHAT</p><h3>チャットの管理</h3></div></div>
+        <ol id="admin-chat-list" class="admin-chat-list"></ol>
+        <button id="admin-chat-clear" class="button button-outline" type="button">このチャットをすべて消す</button>
+      </div>
+    </section>
+    <p id="admin-message" class="message" role="status"></p>
+  </dialog>
+</body>
+</html>

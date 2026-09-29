@@ -1,0 +1,21 @@
+{
+  "name": "lowtalk",
+  "version": "1.0.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yoshihiko-sato/lowtalk.git"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "setup:admin": "node scripts/admin-reset.mjs",
+    "admin:reset": "node scripts/admin-reset.mjs",
+    "test": "node --test test/protocol.test.js test/schedule.test.js",
+    "test:smoke": "node test/smoke.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
