@@ -214,12 +214,21 @@ export class Room extends DurableObject {
   }
   peers() {
     const now = Date.now();
-    return this.ctx.getWebSockets().filter(ws => {
+    const expired = [];
+    const active = this.ctx.getWebSockets().filter(ws => {
       const peer = ws.deserializeAttachment();
       if (ws.readyState !== WebSocket.OPEN || !peer?.id) return false;
-      if (peer.lastSeen && now - peer.lastSeen > STALE_AFTER_MS) { try { ws.close(4000, "応答がないため退出しました"); } catch {} return false; }
+      if (peer.lastSeen && now - peer.lastSeen > STALE_AFTER_MS) {
+        ws.serializeAttachment(null);
+        expired.push(peer.id);
+        try { ws.close(4000, "応答がないため退出しました"); } catch {}
+        return false;
+      }
       return true;
     });
+    // Close callbacks can arrive much later; remove the visible seat immediately.
+    for (const id of expired) for (const ws of active) this.send(ws, { type: "peer-left", id });
+    return active;
   }
   send(ws, data) { try { ws.send(JSON.stringify(data)); } catch {} }
   broadcast(data, except) { for (const ws of this.peers()) if (ws !== except) this.send(ws, data); }
@@ -357,10 +366,19 @@ export class Room extends DurableObject {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return new Response("Upgrade required", { status: 426 });
     const name = cleanName(url.searchParams.get("name")); if (!name) return new Response("Invalid name", { status: 400 });
     return this.ctx.blockConcurrencyWhile(async () => {
+      const session = url.searchParams.get("session");
+      if (session && !/^[a-f0-9-]{36}$/.test(session)) return json({ error: "Invalid session" }, 400);
+      // A private per-page token identifies a reconnect, never a display name.
+      // Retire the old seat before the capacity check, including at a full table.
+      if (session) for (const ws of this.peers()) {
+        if (ws.deserializeAttachment()?.session !== session) continue;
+        this.leave(ws);
+        try { ws.close(4001, "再接続に切り替えました"); } catch {}
+      }
       const present = this.peers(); if (present.length >= MAX_SEATS) return json({ error: "このテーブルは満席です" }, 409);
       const { iceServers, turnEnabled } = await this.iceServers();
       const pair = new WebSocketPair(), [client, server] = Object.values(pair);
-      const self = { id: crypto.randomUUID(), name, table: cleanTable(url.searchParams.get("table")), muted: false, speaking: false, lastSeen: Date.now() };
+      const self = { id: crypto.randomUUID(), session, name, table: cleanTable(url.searchParams.get("table")), muted: false, speaking: false, lastSeen: Date.now() };
       server.serializeAttachment(self); this.ctx.acceptWebSocket(server);
       const messages = await this.messages(); await this.schedule(messages);
       this.send(server, { type: "welcome", self: publicPeer(self), peers: present.map(ws => publicPeer(ws.deserializeAttachment())), messages, capacity: MAX_SEATS, iceServers, turnEnabled });
@@ -372,7 +390,7 @@ export class Room extends DurableObject {
     const sender = ws.deserializeAttachment(); if (!sender) return;
     const message = parseClientMessage(raw); if (!message) return this.send(ws, { type: "error", message: "不正なメッセージを受信しました" });
     sender.lastSeen = Date.now(); ws.serializeAttachment(sender);
-    if (message.type === "heartbeat") return;
+    if (message.type === "heartbeat") { this.send(ws, { type: "heartbeat" }); return; }
     if (message.type === "mute") { sender.muted = message.muted; if (sender.muted) sender.speaking = false; ws.serializeAttachment(sender); this.broadcast({ type: "peer-muted", id: sender.id, muted: sender.muted }, ws); if (sender.muted) this.broadcast({ type: "peer-speaking", id: sender.id, speaking: false }, ws); return; }
     if (message.type === "speaking") { const speaking = !sender.muted && message.speaking; if (sender.speaking === speaking) return; sender.speaking = speaking; ws.serializeAttachment(sender); this.broadcast({ type: "peer-speaking", id: sender.id, speaking }, ws); return; }
     if (message.type === "chat") {

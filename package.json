@@ -12,7 +12,7 @@
     "deploy": "wrangler deploy",
     "setup:admin": "node scripts/admin-reset.mjs",
     "admin:reset": "node scripts/admin-reset.mjs",
-    "test": "node --test test/protocol.test.js test/schedule.test.js",
+    "test": "node --test test/*.test.js",
     "test:smoke": "node test/smoke.mjs"
   },
   "devDependencies": {

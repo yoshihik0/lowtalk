@@ -19,7 +19,10 @@ const TABLE_IMAGES = {
   "3": { src: "/images/tables/back-booth.webp", alt: "店の奥にある静かなボックス席" },
   "4": { src: "/images/tables/bar-counter.webp", alt: "木と真鍮でしつらえたバーカウンター" }
 };
-const state = { socket: null, stream: null, self: null, peers: new Map(), connections: new Map(), iceServers: [], joining: false, moving: false, reconnecting: false, reconnectAttempts: 0, reconnectTimer: 0, reconnectName: "", muted: false, intentionalClose: false, voice: null, table: "1", tables: new Map(), globalMessages: [], store: { name: "LOWTALK", open: true, passcodeRequired: false, authorized: true } };
+const connectionSession = crypto.randomUUID();
+let lastServerMessage = 0;
+let connectionAttempt = 0;
+const state = { socket: null, stream: null, self: null, peers: new Map(), reconnectPeople: [], connections: new Map(), iceServers: [], joining: false, moving: false, reconnecting: false, reconnectAttempts: 0, reconnectTimer: 0, reconnectName: "", muted: false, intentionalClose: false, voice: null, table: "1", tables: new Map(), globalMessages: [], store: { name: "LOWTALK", open: true, passcodeRequired: false, authorized: true } };
 
 function message(text = "") { ui.message.textContent = text; }
 function send(value) { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send(JSON.stringify(value)); }
@@ -212,21 +215,36 @@ function renderTables() {
   }
 }
 
+function participantConnection(person) {
+  if (state.reconnecting) return { kind: "pending", text: "再接続中", detail: "自分の接続を復旧しています。相手の状態はまだ確認できません。" };
+  if (person.id === state.self?.id) return { kind: "online", text: "在席中", detail: "サーバーへの接続を確認しています。相手との音声接続は相手の欄で確認できます。" };
+  const connection = state.connections.get(person.id)?.pc.connectionState;
+  if (connection === "connected") return { kind: "online", text: "音声接続中", detail: "あなたと相手の音声接続が成立しています。無言やミュートでも表示されます。" };
+  if (connection === "failed") return { kind: "pending", text: "再接続中", detail: "音声接続が切れたため、つなぎ直しています。" };
+  return { kind: "pending", text: "接続確認中", detail: "あなたと相手の音声接続を確認しています。" };
+}
+
 function renderPeople() {
   ui.people.replaceChildren();
-  const everyone = [state.self, ...state.peers.values()].filter(Boolean);
+  const everyone = state.reconnecting ? state.reconnectPeople : [state.self, ...state.peers.values()].filter(Boolean);
   for (const person of everyone) {
+    const connection = participantConnection(person);
+    const speaking = !state.reconnecting && !!person.speaking;
     const item = document.createElement("li");
     item.dataset.peerId = person.id;
-    item.classList.toggle("is-speaking", !!person.speaking);
-    item.setAttribute("aria-label", person.speaking ? `${person.name}、音声を検知中` : person.name);
+    item.classList.toggle("is-speaking", speaking);
+    item.setAttribute("aria-label", `${person.name}、${connection.text}${person.muted ? "、ミュート" : ""}${speaking ? "、音声を検知中" : ""}`);
     const avatar = document.createElement("span"); avatar.className = "avatar"; avatar.textContent = initials(person.name);
+    const info = document.createElement("span"); info.className = "participant-info";
     const name = document.createElement("span"); name.className = "name"; name.textContent = person.name;
+    const status = document.createElement("span"); status.className = `connection-state is-${connection.kind}`;
+    status.textContent = connection.text; status.title = connection.detail;
+    info.append(name, status);
     const badge = document.createElement("span"); badge.className = "badge";
-    badge.textContent = person.id === state.self?.id ? "あなた" : person.muted ? "ミュート" : "";
-    item.append(avatar, name, badge); ui.people.append(item);
+    badge.textContent = [person.id === state.self?.id || person.isSelf ? "あなた" : "", person.muted ? "ミュート" : ""].filter(Boolean).join("・");
+    item.append(avatar, info, badge); ui.people.append(item);
   }
-  ui.status.textContent = everyone.length === 1 ? `${TABLE_NAMES[state.table]}で待っています` : `${TABLE_NAMES[state.table]}で${everyone.length}人がつながっています`;
+  if (!state.reconnecting) ui.status.textContent = everyone.length === 1 ? `${TABLE_NAMES[state.table]}で待っています` : `${TABLE_NAMES[state.table]}で${everyone.length}人が在席しています`;
 }
 
 function updateMicButton() {
@@ -240,6 +258,8 @@ function updateMicButton() {
 function closePeer(id) {
   const entry = state.connections.get(id);
   if (!entry) return;
+  clearTimeout(entry.recoveryTimer);
+  entry.pc.onconnectionstatechange = null;
   entry.pc.close(); entry.audio.remove(); state.connections.delete(id);
 }
 
@@ -292,6 +312,10 @@ function startVoiceDetection() {
 }
 
 function cleanup({ keepMedia = false, keepRoomVisible = false, preserveReconnect = false } = {}) {
+  if (preserveReconnect && state.self) {
+    state.reconnectPeople = [{ ...state.self, isSelf: true }, ...state.peers.values()].map(person => ({ ...person }));
+  }
+  connectionAttempt += 1;
   state.intentionalClose = true;
   if (state.self?.speaking) send({ type: "speaking", speaking: false });
   state.socket?.close(); state.socket = null;
@@ -303,6 +327,7 @@ function cleanup({ keepMedia = false, keepRoomVisible = false, preserveReconnect
   }
   state.self = null; state.peers.clear(); state.joining = false;
   if (!preserveReconnect) {
+    state.reconnectPeople = [];
     clearTimeout(state.reconnectTimer); state.reconnectTimer = 0;
     state.reconnecting = false; state.reconnectAttempts = 0; state.reconnectName = "";
   }
@@ -319,6 +344,7 @@ function scheduleReconnect(name) {
   if (state.reconnectTimer || !name) return;
   state.reconnecting = true;
   state.reconnectName = name;
+  renderPeople();
   const delay = Math.min(1000 * (2 ** state.reconnectAttempts), 15_000);
   state.reconnectAttempts += 1;
   ui.status.textContent = `接続が切れました。${Math.ceil(delay / 1000)}秒後に戻ります…`;
@@ -326,6 +352,22 @@ function scheduleReconnect(name) {
     state.reconnectTimer = 0;
     connectToTable(name, true);
   }, delay);
+}
+
+function recoverConnection() {
+  if (!state.self || state.reconnecting || state.intentionalClose) return;
+  const name = state.self.name;
+  cleanup({ keepMedia: true, keepRoomVisible: true, preserveReconnect: true });
+  message("通信が不安定になったため、音声をつなぎ直しています…");
+  scheduleReconnect(name);
+}
+
+function heartbeat() {
+  if (state.self && Date.now() - lastServerMessage > 60_000) {
+    recoverConnection();
+    return;
+  }
+  send({ type: "heartbeat" });
 }
 
 async function refreshRooms() {
@@ -350,7 +392,14 @@ function createConnection(peerId) {
   pc.ontrack = event => { audio.srcObject = event.streams[0]; audio.play().catch(() => message("音声を再生できません。画面をタップしてから再試行してください。")); };
   pc.onicecandidate = event => { if (event.candidate) send({ type: "signal", to: peerId, data: { type: "candidate", candidate: event.candidate.toJSON() } }); };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === "failed") message("接続に失敗しました。通信環境を確認し、席を離れて入り直してください。TURN未設定の場合は中継ができません。");
+    if (state.connections.get(peerId) !== entry) return;
+    clearTimeout(entry.recoveryTimer);
+    renderPeople();
+    if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+      entry.recoveryTimer = setTimeout(() => {
+        if (state.connections.get(peerId) === entry && ["failed", "disconnected"].includes(pc.connectionState)) recoverConnection();
+      }, pc.connectionState === "failed" ? 1000 : 10_000);
+    }
   };
   return entry;
 }
@@ -388,9 +437,13 @@ async function handleEvent(event) {
       clearTimeout(state.reconnectTimer); state.reconnectTimer = 0;
       state.joining = false;
       state.moving = false;
+      if (state.reconnecting) message();
       state.reconnecting = false;
       state.reconnectAttempts = 0; state.reconnectName = "";
+      state.reconnectPeople = [];
       state.self = data.self;
+      state.self.muted = state.muted;
+      send({ type: "mute", muted: state.muted });
       state.peers = new Map(data.peers.map(peer => [peer.id, peer]));
       state.iceServers = data.iceServers;
       ui.lobby.hidden = true; ui.room.hidden = false; ui.chatPanel.hidden = false; ui.intro.hidden = false; ui.join.disabled = false;
@@ -424,26 +477,46 @@ async function connectToTable(name, moving = false) {
   if (state.store.passcodeRequired && !state.store.authorized) { renderStore(); ui.entryPasscode.focus(); return; }
   if (!name || [...name].length > 24) { message("お名前を1〜24文字で入力してください。"); ui.name.focus(); return; }
   if (state.joining || state.self) return;
+  const attempt = ++connectionAttempt;
   state.joining = true; state.moving = moving; state.intentionalClose = false; renderTables();
   if (!moving) message();
   try { await fetchJson("/api/entry", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }); }
-  catch (error) { state.joining = false; await refreshStore(); message(error.message); renderTables(); return; }
+  catch (error) {
+    if (attempt !== connectionAttempt) return;
+    state.joining = false; await refreshStore();
+    if (attempt !== connectionAttempt) return;
+    message(error.message); renderTables();
+    if (state.reconnecting && state.store.open && state.store.authorized) scheduleReconnect(name);
+    return;
+  }
+  if (attempt !== connectionAttempt) return;
   if (!state.stream) {
     try {
-      state.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      if (attempt !== connectionAttempt) { stream.getTracks().forEach(track => track.stop()); return; }
+      state.stream = stream;
       startVoiceDetection();
     } catch {
+      if (attempt !== connectionAttempt) return;
       state.stream = null;
       message(window.isSecureContext
         ? "マイクが使えないため、聞くだけで参加します。"
         : "このHTTPアドレスではマイクを使えません。音声参加にはHTTPSまたはlocalhostで開いてください。");
     }
   }
-  if (!state.joining) return;
+  if (attempt !== connectionAttempt || !state.joining) return;
   const scheme = location.protocol === "https:" ? "wss:" : "ws:";
-  const socket = new WebSocket(`${scheme}//${location.host}/api/room?table=${state.table}&name=${encodeURIComponent(name)}`);
+  const socket = new WebSocket(`${scheme}//${location.host}/api/room?table=${state.table}&name=${encodeURIComponent(name)}&session=${connectionSession}`);
   state.socket = socket;
-  socket.addEventListener("message", event => { handleEvent(event).catch(error => { console.error(error); message("接続処理でエラーが起きました。入り直してください。"); }); });
+  lastServerMessage = Date.now();
+  socket.addEventListener("message", event => {
+    if (state.socket !== socket || state.intentionalClose) return;
+    lastServerMessage = Date.now();
+    handleEvent(event).catch(error => {
+      if (state.socket !== socket || state.intentionalClose) return;
+      console.error(error); message("接続処理でエラーが起きました。入り直してください。");
+    });
+  });
   socket.addEventListener("close", async () => {
     if (state.socket !== socket || state.intentionalClose) return;
     const wasJoining = state.joining;
@@ -463,7 +536,7 @@ async function connectToTable(name, moving = false) {
       scheduleReconnect(nameForReconnect);
     }
   });
-  socket.addEventListener("error", () => { if (state.joining) message("接続に失敗しました。少し待って再試行してください。"); });
+  socket.addEventListener("error", () => { if (state.socket === socket && state.joining) message("接続に失敗しました。少し待って再試行してください。"); });
 }
 
 async function join() { await connectToTable(ui.name.value.trim()); }
@@ -564,5 +637,5 @@ refreshStore();
 refreshRooms();
 setInterval(refreshRooms, 10_000);
 setInterval(refreshStore, 30_000);
-setInterval(() => send({ type: "heartbeat" }), 20_000);
+setInterval(heartbeat, 20_000);
 setInterval(refreshGlobalChat, 3_000);

@@ -56,6 +56,13 @@ input:focus { border-color: #c7e68f; box-shadow: 0 0 0 3px #c7e68f25; } input::p
 .room-status { display: flex; gap: 8px; color: #c7e68f; font-size: 12px; align-items: center; }.status-icon { font-size: 8px; }
 .participant-list { list-style: none; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 16px 0 18px; }
 .participant-list li { display: flex; align-items: center; gap: 8px; min-width: 0; background: #2d342c; border: 1px solid #3e493b; padding: 9px 10px; border-radius: 8px; font-size: 12px; transition: background .35s ease, border-color .35s ease, box-shadow .35s ease; }.participant-list li span.name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.participant-list li span.badge { font-size: 10px; color: #a9b4a3; margin-left: auto; }
+.participant-info { flex: 1; min-width: 0; }
+.participant-info .name { display: block; }
+.connection-state { display: flex; align-items: center; gap: 5px; margin-top: 4px; font-size: 10px; line-height: 1.4; color: #d9c58e; }
+.connection-state::before { content: ""; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.connection-state.is-online { color: #b7d48f; }
+.participant-list li span.badge { flex-shrink: 0; }
+
 .avatar { flex: 0 0 23px; width: 23px; height: 23px; border-radius: 50%; background: #7d9f6e; color: #172012; display: grid; place-items: center; font-size: 10px; font-weight: 700; position: relative; }
 .participant-list li.is-speaking { background: #344032; border-color: #86a873; box-shadow: 0 0 22px #bfe99116, inset 0 0 18px #bfe9910a; }
 .participant-list li.is-speaking .avatar { animation: voice-breathe 1.15s ease-in-out infinite; }

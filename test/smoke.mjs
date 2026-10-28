@@ -49,12 +49,30 @@ try {
 
   const initial = await (await fetch(`${base}/api/room`)).json();
   const available = initial.capacity - initial.count;
+  const joined = [];
   for (let number = 1; number <= available; number++) {
-    const socket = new WebSocket(`${base.replace(/^http/, "ws")}/api/room?name=guest${number}`);
+    const session = crypto.randomUUID();
+    const socket = new WebSocket(`${base.replace(/^http/, "ws")}/api/room?name=guest${number}&session=${session}`);
     sockets.push(socket);
     const welcome = await waitFor(socket, value => value.type === "welcome");
     assert.equal(welcome.peers.length, initial.count + number - 1);
     assert.equal(welcome.capacity, 6);
+    joined.push({ socket, session, self: welcome.self });
+  }
+  if (joined.length) {
+    // Reconnect while the original socket is still alive and the table is full.
+    const first = joined[0], observer = joined[1];
+    const left = observer && waitFor(observer.socket, value => value.type === "peer-left" && value.id === first.self.id);
+    const replacement = new WebSocket(`${base.replace(/^http/, "ws")}/api/room?name=${first.self.name}&session=${first.session}`);
+    sockets.push(replacement);
+    const welcome = await waitFor(replacement, value => value.type === "welcome");
+    assert.equal(welcome.peers.length, 5);
+    assert.ok(!welcome.peers.some(peer => peer.id === first.self.id));
+    assert.notEqual(welcome.self.id, first.self.id);
+    if (left) await left;
+    const heartbeat = waitFor(replacement, value => value.type === "heartbeat");
+    replacement.send(JSON.stringify({ type: "heartbeat" }));
+    await heartbeat;
   }
   const status = await (await fetch(`${base}/api/room`)).json();
   assert.equal(status.count, 6);
@@ -64,7 +82,7 @@ try {
     extra.addEventListener("open", () => resolve(false), { once: true });
   });
   assert.equal(rejected, true, "the seventh participant must be rejected");
-  console.log("Smoke test passed: six joined, seventh rejected.");
+  console.log("Smoke test passed: full-table reconnect replaced the old seat, heartbeat acknowledged, seventh rejected.");
 } finally {
   await Promise.all([closeSocket(extra), ...sockets.map(closeSocket)]);
 }
